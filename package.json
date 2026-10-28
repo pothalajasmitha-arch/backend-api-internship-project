@@ -1,0 +1,22 @@
+{
+  "name": "backend-api-internship-project",
+  "version": "1.0.0",
+  "private": true,
+  "description": "E-commerce API design and blog API implementation internship project",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test",
+    "benchmark": "node scripts/benchmark.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.8.1",
+    "express": "^5.1.0",
+    "jsonwebtoken": "^9.0.2"
+  },
+  "devDependencies": {
+    "supertest": "^7.1.1"
+  }
+}

@@ -1,0 +1,444 @@
+openapi: 3.1.0
+info:
+  title: Simple Commerce API
+  version: 1.0.0
+  description: >-
+    Week 1 planning specification for a small e-commerce service. Public product
+    reads are unauthenticated; customer operations require a bearer access token;
+    inventory changes and product/order administration require a staff role.
+servers:
+  - url: https://api.example.com/v1
+    description: Production placeholder
+tags:
+  - name: Authentication
+  - name: Products
+  - name: Inventory
+  - name: Orders
+  - name: Users
+security:
+  - bearerAuth: []
+paths:
+  /auth/register:
+    post:
+      tags: [Authentication]
+      security: []
+      summary: Register a customer account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, password]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 100 }
+                email: { type: string, format: email, maxLength: 254 }
+                password: { type: string, minLength: 12, maxLength: 128, writeOnly: true }
+      responses:
+        '201':
+          description: Account created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      user: { $ref: '#/components/schemas/User' }
+                      accessToken: { type: string }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /auth/login:
+    post:
+      tags: [Authentication]
+      security: []
+      summary: Exchange customer credentials for an access token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, minLength: 1, writeOnly: true }
+      responses:
+        '200': { description: Authenticated, content: { application/json: { schema: { $ref: '#/components/schemas/AuthResponse' } } } }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /users/me:
+    get:
+      tags: [Users]
+      summary: Read the authenticated customer's profile
+      responses:
+        '200': { description: Current customer, content: { application/json: { schema: { $ref: '#/components/schemas/UserResponse' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    patch:
+      tags: [Users]
+      summary: Update the authenticated customer's profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                name: { type: string, minLength: 1, maxLength: 100 }
+                email: { type: string, format: email, maxLength: 254 }
+      responses:
+        '200': { description: Updated customer, content: { application/json: { schema: { $ref: '#/components/schemas/UserResponse' } } } }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    delete:
+      tags: [Users]
+      summary: Delete the authenticated customer's account
+      responses:
+        '204': { description: Account and associated personal data deleted according to retention policy }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /products:
+    get:
+      tags: [Products]
+      security: []
+      summary: Search and list active products
+      parameters:
+        - in: query
+          name: q
+          schema: { type: string, maxLength: 100 }
+          description: Case-insensitive product-name search
+        - in: query
+          name: category
+          schema: { type: string, maxLength: 80 }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - in: query
+          name: cursor
+          schema: { type: string }
+          description: Opaque cursor for the next page
+      responses:
+        '200': { description: Product page, content: { application/json: { schema: { $ref: '#/components/schemas/ProductPage' } } } }
+        '400': { $ref: '#/components/responses/ValidationError' }
+    post:
+      tags: [Products]
+      summary: Create a product (staff only)
+      security: [{ bearerAuth: [] }]
+      x-required-role: staff
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProductInput' }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/ProductResponse' } } } }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /products/{productId}:
+    parameters:
+      - $ref: '#/components/parameters/ProductId'
+    get:
+      tags: [Products]
+      security: []
+      summary: Read a product
+      responses:
+        '200': { description: Product, content: { application/json: { schema: { $ref: '#/components/schemas/ProductResponse' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Products]
+      summary: Update a product (staff only)
+      security: [{ bearerAuth: [] }]
+      x-required-role: staff
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProductPatch' }
+      responses:
+        '200': { description: Updated product, content: { application/json: { schema: { $ref: '#/components/schemas/ProductResponse' } } } }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Products]
+      summary: Archive a product (staff only)
+      security: [{ bearerAuth: [] }]
+      x-required-role: staff
+      responses:
+        '204': { description: Product archived; historical order lines are retained }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /products/{productId}/inventory:
+    parameters:
+      - $ref: '#/components/parameters/ProductId'
+    get:
+      tags: [Inventory]
+      security: []
+      summary: Read sellable availability without exposing internal stock metadata
+      responses:
+        '200': { description: Availability, content: { application/json: { schema: { $ref: '#/components/schemas/InventoryResponse' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Inventory]
+      summary: Set inventory quantity (staff only; audited)
+      security: [{ bearerAuth: [] }]
+      x-required-role: staff
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [quantity, reason]
+              properties:
+                quantity: { type: integer, minimum: 0 }
+                reason: { type: string, minLength: 3, maxLength: 200 }
+      responses:
+        '200': { description: Inventory updated, content: { application/json: { schema: { $ref: '#/components/schemas/InventoryResponse' } } } }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /orders:
+    get:
+      tags: [Orders]
+      summary: List the current customer's orders
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - in: query
+          name: cursor
+          schema: { type: string }
+      responses:
+        '200': { description: Customer order page, content: { application/json: { schema: { $ref: '#/components/schemas/OrderPage' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [Orders]
+      summary: Place an order using an atomic stock reservation
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema: { type: string, minLength: 16, maxLength: 128 }
+          description: Unique key scoped to the authenticated user; safe retry returns the original order
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items, shippingAddress]
+              properties:
+                items:
+                  type: array
+                  minItems: 1
+                  maxItems: 50
+                  items:
+                    type: object
+                    required: [productId, quantity]
+                    properties:
+                      productId: { type: integer, minimum: 1 }
+                      quantity: { type: integer, minimum: 1, maximum: 100 }
+                shippingAddress: { $ref: '#/components/schemas/Address' }
+      responses:
+        '201': { description: Order placed, content: { application/json: { schema: { $ref: '#/components/schemas/OrderResponse' } } } }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { description: Insufficient inventory or idempotency key reused for a different request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /orders/{orderId}:
+    parameters:
+      - in: path
+        name: orderId
+        required: true
+        schema: { type: integer, minimum: 1 }
+    get:
+      tags: [Orders]
+      summary: Read an order belonging to the current customer (staff may read any order)
+      responses:
+        '200': { description: Order, content: { application/json: { schema: { $ref: '#/components/schemas/OrderResponse' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Orders]
+      summary: Cancel an order before fulfillment (customer owner or staff)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [cancelled] }
+      responses:
+        '200': { description: Order cancelled and reserved stock released, content: { application/json: { schema: { $ref: '#/components/schemas/OrderResponse' } } } }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Order is already fulfilled or cancelled }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    ProductId:
+      in: path
+      name: productId
+      required: true
+      schema: { type: integer, minimum: 1 }
+  schemas:
+    User:
+      type: object
+      required: [id, name, email, createdAt]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        email: { type: string, format: email }
+        createdAt: { type: string, format: date-time }
+    UserResponse:
+      type: object
+      properties:
+        data: { $ref: '#/components/schemas/User' }
+    AuthResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            user: { $ref: '#/components/schemas/User' }
+            accessToken: { type: string }
+    Product:
+      type: object
+      required: [id, name, description, sku, price, currency, category, active, createdAt, updatedAt]
+      properties:
+        id: { type: integer }
+        name: { type: string, maxLength: 200 }
+        description: { type: string, maxLength: 10000 }
+        sku: { type: string, maxLength: 64 }
+        price: { type: string, pattern: '^\d+\.\d{2}$', description: Decimal money encoded as a string to avoid floating-point rounding }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        category: { type: string, maxLength: 80 }
+        active: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    ProductInput:
+      type: object
+      required: [name, description, sku, price, currency, category]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+        description: { type: string, maxLength: 10000 }
+        sku: { type: string, minLength: 1, maxLength: 64 }
+        price: { type: string, pattern: '^\d+\.\d{2}$' }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        category: { type: string, minLength: 1, maxLength: 80 }
+    ProductPatch:
+      type: object
+      minProperties: 1
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+        description: { type: string, maxLength: 10000 }
+        sku: { type: string, minLength: 1, maxLength: 64 }
+        price: { type: string, pattern: '^\d+\.\d{2}$' }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        category: { type: string, minLength: 1, maxLength: 80 }
+        active: { type: boolean }
+    ProductResponse:
+      type: object
+      properties:
+        data: { $ref: '#/components/schemas/Product' }
+    ProductPage:
+      type: object
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/Product' } }
+        page: { $ref: '#/components/schemas/PageInfo' }
+    PageInfo:
+      type: object
+      properties:
+        nextCursor: { type: [string, 'null'] }
+        hasMore: { type: boolean }
+    InventoryResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            productId: { type: integer }
+            available: { type: integer, minimum: 0 }
+            inStock: { type: boolean }
+            updatedAt: { type: string, format: date-time }
+    Address:
+      type: object
+      required: [recipient, line1, city, postalCode, countryCode]
+      properties:
+        recipient: { type: string, maxLength: 100 }
+        line1: { type: string, maxLength: 200 }
+        line2: { type: string, maxLength: 200 }
+        city: { type: string, maxLength: 100 }
+        region: { type: string, maxLength: 100 }
+        postalCode: { type: string, maxLength: 20 }
+        countryCode: { type: string, pattern: '^[A-Z]{2}$' }
+    OrderItem:
+      type: object
+      properties:
+        productId: { type: integer }
+        productName: { type: string }
+        sku: { type: string }
+        quantity: { type: integer }
+        unitPrice: { type: string, pattern: '^\d+\.\d{2}$' }
+        lineTotal: { type: string, pattern: '^\d+\.\d{2}$' }
+    Order:
+      type: object
+      properties:
+        id: { type: integer }
+        status: { type: string, enum: [pending, paid, cancelled, fulfilled] }
+        currency: { type: string }
+        total: { type: string, pattern: '^\d+\.\d{2}$' }
+        items: { type: array, items: { $ref: '#/components/schemas/OrderItem' } }
+        shippingAddress: { $ref: '#/components/schemas/Address' }
+        createdAt: { type: string, format: date-time }
+    OrderResponse:
+      type: object
+      properties:
+        data: { $ref: '#/components/schemas/Order' }
+    OrderPage:
+      type: object
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/Order' } }
+        page: { $ref: '#/components/schemas/PageInfo' }
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            details: { type: array, items: { type: string } }
+    ValidationError:
+      description: Invalid input or parameters
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    Unauthorized:
+      description: Missing or invalid authentication
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    Forbidden:
+      description: Authenticated user lacks permission
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    NotFound:
+      description: Resource not found
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    Conflict:
+      description: Resource conflicts with current state
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
